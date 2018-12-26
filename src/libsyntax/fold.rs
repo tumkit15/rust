@@ -1256,6 +1256,10 @@ pub fn noop_fold_expr<T: Folder>(Expr {id, node, span, attrs}: Expr, folder: &mu
                 ExprKind::Type(folder.fold_expr(expr), folder.fold_ty(ty))
             }
             ExprKind::AddrOf(m, ohs) => ExprKind::AddrOf(m, folder.fold_expr(ohs)),
+            ExprKind::Let(pats, expr) => {
+                ExprKind::Let(pats.move_map(|pat| folder.fold_pat(pat)),
+                          folder.fold_expr(expr))
+            }
             ExprKind::If(cond, tr, fl) => {
                 ExprKind::If(folder.fold_expr(cond),
                        folder.fold_block(tr),

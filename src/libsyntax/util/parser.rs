@@ -139,8 +139,11 @@ impl AssocOp {
         }
     }
 
-    /// Gets the precedence of this operator
-    pub fn precedence(&self) -> usize {
+    /// Gets the precedence of this operator.
+    ///
+    /// In `if` expressions, the precedence of `&&` and `||` are
+    /// moved to the bottom.
+    pub fn precedence(&self, in_if: bool) -> usize {
         use self::AssocOp::*;
         match *self {
             As | Colon => 14,
@@ -151,6 +154,13 @@ impl AssocOp {
             BitXor => 9,
             BitOr => 8,
             Less | Greater | LessEqual | GreaterEqual | Equal | NotEqual => 7,
+
+            DotDot | DotDotEq if in_if => 6,
+            ObsoleteInPlace if in_if => 5,
+            Assign | AssignOp(_) if in_if => 4,
+            LAnd if in_if => 3,
+            LOr if in_if => 2,
+
             LAnd => 6,
             LOr => 5,
             DotDot | DotDotEq => 4,
@@ -244,6 +254,8 @@ pub enum ExprPrecedence {
     Cast,
     Type,
 
+    Let,
+
     Assign,
     AssignOp,
 
@@ -279,7 +291,7 @@ pub enum ExprPrecedence {
 }
 
 impl ExprPrecedence {
-    pub fn order(self) -> i8 {
+    pub fn order(self, in_if: bool) -> i8 {
         match self {
             ExprPrecedence::Closure => PREC_CLOSURE,
 
@@ -295,13 +307,17 @@ impl ExprPrecedence {
             ExprPrecedence::Range => PREC_RANGE,
 
             // Binop-like expr kinds, handled by `AssocOp`.
-            ExprPrecedence::Binary(op) => AssocOp::from_ast_binop(op).precedence() as i8,
-            ExprPrecedence::ObsoleteInPlace => AssocOp::ObsoleteInPlace.precedence() as i8,
-            ExprPrecedence::Cast => AssocOp::As.precedence() as i8,
-            ExprPrecedence::Type => AssocOp::Colon.precedence() as i8,
+            ExprPrecedence::Binary(op) =>
+                AssocOp::from_ast_binop(op).precedence(in_if) as i8,
+            ExprPrecedence::ObsoleteInPlace =>
+                AssocOp::ObsoleteInPlace.precedence(in_if) as i8,
+            ExprPrecedence::Cast => AssocOp::As.precedence(in_if) as i8,
+            ExprPrecedence::Type => AssocOp::Colon.precedence(in_if) as i8,
+
+            ExprPrecedence::Let => 4, // TODO
 
             ExprPrecedence::Assign |
-            ExprPrecedence::AssignOp => AssocOp::Assign.precedence() as i8,
+            ExprPrecedence::AssignOp => AssocOp::Assign.precedence(in_if) as i8,
 
             // Unary, prefix
             ExprPrecedence::Box |

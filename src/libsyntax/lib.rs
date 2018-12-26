@@ -29,6 +29,8 @@
 #![feature(try_trait)]
 #![feature(unicode_internals)]
 
+#![feature(rustc_private)]
+
 #![recursion_limit="256"]
 
 #[macro_use] extern crate bitflags;
@@ -201,4 +203,4 @@ pub mod early_buffered_lints;
 #[cfg(test)]
 mod test_snippet;
 
-__build_diagnostic_array! { libsyntax, DIAGNOSTICS }
+//__build_diagnostic_array! { libsyntax, DIAGNOSTICS }

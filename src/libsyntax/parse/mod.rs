@@ -1059,3 +1059,49 @@ mod tests {
         });
     }
 }
+
+#[cfg(test)]
+mod tests2 {
+    //use print::pprust::{item_to_string, item_to_expr};
+    use util::parser_testing::string_to_expr;
+    //use print::pprust::expr_to_string;
+    //use rustc_serialize::json;
+    //use util::parser_testing::string_to_item;
+    use with_globals;
+
+    #[test] fn parse_if_let() {
+        with_globals(|| {
+let ex_s = [
+"if let _ = true && true {}",
+"if let _ = (true && true) {}",
+"if (let _ = true) && true {}",
+"if let _ = true || true {}",
+"if let _ = (true || true) {}",
+"if (let _ = true) || true {}",
+"if true && true {}",
+"if true || true {}",
+"if a && b || c && d {}",
+"if let Range { start: _, end: _ } = true..true && false {}",
+//"if let PAT = break true && false {}", // bug?
+//"if let PAT = F..|| false {}", // bug?
+"if let _ = true..&&false {}",
+];
+
+            for ex_s in &ex_s {
+                let vitem = string_to_expr(ex_s.to_string());
+                dbg!(&vitem);
+            }
+
+            //println!("{:#?}", vitem.into_inner().node);
+
+            //let _vitem_s = expr_to_string(&vitem);
+            //let vitem_se = json::encode(&vitem).unwrap();
+            //println!("{}", vitem_se);
+            /*
+            assert_eq!(&vitem_s[..], ex_s);
+            */
+
+            panic!("END");
+        })
+    }
+}

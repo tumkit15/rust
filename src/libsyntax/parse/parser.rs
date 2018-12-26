@@ -238,6 +238,7 @@ pub struct Parser<'a> {
     /// the previous token kind
     prev_token_kind: PrevTokenKind,
     restrictions: Restrictions,
+    let_expr_allowed: bool, // TODO
     /// Used to determine the path to externally loaded source files
     crate directory: Directory<'a>,
     /// Whether to parse sub-modules in other files.
@@ -555,6 +556,7 @@ impl<'a> Parser<'a> {
             meta_var_span: None,
             prev_token_kind: PrevTokenKind::Other,
             restrictions: Restrictions::empty(),
+            let_expr_allowed: false,
             recurse_into_file_modules,
             directory: Directory {
                 path: Cow::from(PathBuf::new()),
@@ -2552,13 +2554,16 @@ impl<'a> Parser<'a> {
                     } else {
                         ex = ExprKind::Yield(None);
                     }
-                } else if self.token.is_keyword(keywords::Let) {
+                } else if self.eat_keyword(keywords::Let) { // TODO
+                    return self.parse_let_expr(attrs);
+                    /*
                     // Catch this syntax error here, instead of in `parse_ident`, so
                     // that we can explicitly mention that let is not to be used as an expression
                     let mut db = self.fatal("expected expression, found statement (`let`)");
                     db.span_label(self.span, "expected expression");
                     db.note("variable declaration using `let` is a statement");
                     return Err(db);
+                    */
                 } else if self.token.is_path_start() {
                     let pth = self.parse_path(PathStyle::Expr)?;
 
@@ -2606,6 +2611,20 @@ impl<'a> Parser<'a> {
         let expr = self.maybe_recover_from_bad_qpath(expr, true)?;
 
         return Ok(P(expr));
+    }
+
+    /// Parse a `let pat = expr` expression which may occur in the condition
+    /// of `if` or `while` expressions. The `let` token has already been eaten.
+    fn parse_let_expr(&mut self, attrs: ThinVec<Attribute>) -> PResult<'a, P<Expr>> {
+        let lo = self.prev_span;
+        let pats = self.parse_pats()?;
+        self.expect(&token::Eq)?;
+        let expr = self.with_res(
+            Restrictions::NO_STRUCT_LITERAL,
+            |this| this.parse_assoc_expr_with(4, None.into())
+        )?;
+        let hi = expr.span;
+        Ok(self.mk_expr(lo.to(hi), ExprKind::Let(pats, expr), attrs))
     }
 
     fn parse_struct_expr(&mut self, lo: Span, pth: ast::Path, mut attrs: ThinVec<Attribute>)
@@ -3112,7 +3131,8 @@ impl<'a> Parser<'a> {
             } else {
                 self.restrictions
             };
-            if op.precedence() < min_prec {
+            let prec = op.precedence(self.let_expr_allowed);
+            if prec < min_prec {
                 break;
             }
             // Check for deprecated `...` syntax
@@ -3156,8 +3176,7 @@ impl<'a> Parser<'a> {
                 // We have 2 alternatives here: `x..y`/`x..=y` and `x..`/`x..=` The other
                 // two variants are handled with `parse_prefix_range_expr` call above.
                 let rhs = if self.is_at_start_of_range_notation_rhs() {
-                    Some(self.parse_assoc_expr_with(op.precedence() + 1,
-                                                    LhsExpr::NotYetParsed)?)
+                    Some(self.parse_assoc_expr_with(prec + 1, LhsExpr::NotYetParsed)?)
                 } else {
                     None
                 };
@@ -3180,24 +3199,18 @@ impl<'a> Parser<'a> {
             let rhs = match op.fixity() {
                 Fixity::Right => self.with_res(
                     restrictions - Restrictions::STMT_EXPR,
-                    |this| {
-                        this.parse_assoc_expr_with(op.precedence(),
-                            LhsExpr::NotYetParsed)
-                }),
+                    |this| this.parse_assoc_expr_with(prec, LhsExpr::NotYetParsed) // TODO
+                ),
                 Fixity::Left => self.with_res(
                     restrictions - Restrictions::STMT_EXPR,
-                    |this| {
-                        this.parse_assoc_expr_with(op.precedence() + 1,
-                            LhsExpr::NotYetParsed)
-                }),
+                    |this| this.parse_assoc_expr_with(prec + 1, LhsExpr::NotYetParsed) // TODO
+                ),
                 // We currently have no non-associative operators that are not handled above by
                 // the special cases. The code is here only for future convenience.
                 Fixity::None => self.with_res(
                     restrictions - Restrictions::STMT_EXPR,
-                    |this| {
-                        this.parse_assoc_expr_with(op.precedence() + 1,
-                            LhsExpr::NotYetParsed)
-                }),
+                    |this| this.parse_assoc_expr_with(prec + 1, LhsExpr::NotYetParsed) // TODO
+                ),
             }?;
 
             let span = lhs_span.to(rhs.span);
@@ -3364,7 +3377,8 @@ impl<'a> Parser<'a> {
         self.bump();
         let opt_end = if self.is_at_start_of_range_notation_rhs() {
             // RHS must be parsed with more associativity than the dots.
-            let next_prec = AssocOp::from_token(&tok).unwrap().precedence() + 1;
+            let next_prec = AssocOp::from_token(&tok).unwrap()
+                .precedence(self.let_expr_allowed) + 1;
             Some(self.parse_assoc_expr_with(next_prec,
                                             LhsExpr::NotYetParsed)
                 .map(|x|{
@@ -3398,11 +3412,16 @@ impl<'a> Parser<'a> {
 
     /// Parse an 'if' or 'if let' expression ('if' token already eaten)
     fn parse_if_expr(&mut self, attrs: ThinVec<Attribute>) -> PResult<'a, P<Expr>> {
+        /*
+        TODO
         if self.check_keyword(keywords::Let) {
             return self.parse_if_let_expr(attrs);
         }
+        */
         let lo = self.prev_span;
+        let tmp = mem::replace(&mut self.let_expr_allowed, true);
         let cond = self.parse_expr_res(Restrictions::NO_STRUCT_LITERAL, None)?;
+        self.let_expr_allowed = tmp;
 
         // Verify that the parsed `if` condition makes sense as a condition. If it is a block, then
         // verify that the last statement is either an implicit return (no `;`) or an explicit
@@ -3432,6 +3451,8 @@ impl<'a> Parser<'a> {
         Ok(self.mk_expr(lo.to(hi), ExprKind::If(cond, thn, els), attrs))
     }
 
+    /*
+    TODO
     /// Parse an 'if let' expression ('if' token already eaten)
     fn parse_if_let_expr(&mut self, attrs: ThinVec<Attribute>)
                              -> PResult<'a, P<Expr>> {
@@ -3449,6 +3470,7 @@ impl<'a> Parser<'a> {
         };
         Ok(self.mk_expr(lo.to(hi), ExprKind::IfLet(pats, expr, thn, els), attrs))
     }
+    */
 
     // `move |args| expr`
     fn parse_lambda_expr(&mut self,

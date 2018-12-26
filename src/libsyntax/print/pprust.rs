@@ -61,7 +61,8 @@ pub struct State<'a> {
     cur_cmnt: usize,
     boxes: Vec<pp::Breaks>,
     ann: &'a (dyn PpAnn+'a),
-    is_expanded: bool
+    is_expanded: bool,
+    in_if: bool,
 }
 
 fn rust_printer<'a>(writer: Box<dyn Write+'a>, ann: &'a dyn PpAnn) -> State<'a> {
@@ -73,7 +74,8 @@ fn rust_printer<'a>(writer: Box<dyn Write+'a>, ann: &'a dyn PpAnn) -> State<'a> 
         cur_cmnt: 0,
         boxes: Vec::new(),
         ann,
-        is_expanded: false
+        is_expanded: false,
+        in_if: false,
     }
 }
 
@@ -136,7 +138,7 @@ impl<'a> State<'a> {
             // literals, since it doesn't correspond with the literals
             // in the AST anymore.
             if is_expanded { None } else { Some(lits) },
-            is_expanded
+            is_expanded,
         )
     }
 
@@ -154,7 +156,8 @@ impl<'a> State<'a> {
             cur_cmnt: 0,
             boxes: Vec::new(),
             ann,
-            is_expanded: is_expanded
+            is_expanded,
+            in_if: false,
         }
     }
 }
@@ -1835,6 +1838,14 @@ impl<'a> State<'a> {
         }
     }
 
+    pub fn print_let(&mut self, pats: &[P<ast::Pat>], expr: &ast::Expr) -> io::Result<()> {
+        self.head("let")?;
+        self.print_pats(pats)?;
+        self.s.space()?;
+        self.word_space("=")?;
+        self.print_expr_as_cond(expr)
+    }
+
     pub fn print_if(&mut self, test: &ast::Expr, blk: &ast::Block,
                     elseopt: Option<&ast::Expr>) -> io::Result<()> {
         self.head("if")?;
@@ -1883,7 +1894,7 @@ impl<'a> State<'a> {
     }
 
     pub fn print_expr_maybe_paren(&mut self, expr: &ast::Expr, prec: i8) -> io::Result<()> {
-        let needs_par = expr.precedence().order() < prec;
+        let needs_par = expr.precedence().order(self.in_if) < prec;
         if needs_par {
             self.popen()?;
         }
@@ -2023,7 +2034,7 @@ impl<'a> State<'a> {
                          lhs: &ast::Expr,
                          rhs: &ast::Expr) -> io::Result<()> {
         let assoc_op = AssocOp::from_ast_binop(op.node);
-        let prec = assoc_op.precedence() as i8;
+        let prec = assoc_op.precedence(self.in_if) as i8;
         let fixity = assoc_op.fixity();
 
         let (left_prec, right_prec) = match fixity {
@@ -2086,7 +2097,7 @@ impl<'a> State<'a> {
                 self.print_expr_maybe_paren(expr, parser::PREC_PREFIX)?;
             }
             ast::ExprKind::ObsoleteInPlace(ref place, ref expr) => {
-                let prec = AssocOp::ObsoleteInPlace.precedence() as i8;
+                let prec = AssocOp::ObsoleteInPlace.precedence(self.in_if) as i8;
                 self.print_expr_maybe_paren(place, prec + 1)?;
                 self.s.space()?;
                 self.word_space("<-")?;
@@ -2123,17 +2134,20 @@ impl<'a> State<'a> {
                 self.print_literal(lit)?;
             }
             ast::ExprKind::Cast(ref expr, ref ty) => {
-                let prec = AssocOp::As.precedence() as i8;
+                let prec = AssocOp::As.precedence(self.in_if) as i8;
                 self.print_expr_maybe_paren(expr, prec)?;
                 self.s.space()?;
                 self.word_space("as")?;
                 self.print_type(ty)?;
             }
             ast::ExprKind::Type(ref expr, ref ty) => {
-                let prec = AssocOp::Colon.precedence() as i8;
+                let prec = AssocOp::Colon.precedence(self.in_if) as i8;
                 self.print_expr_maybe_paren(expr, prec)?;
                 self.word_space(":")?;
                 self.print_type(ty)?;
+            }
+            ast::ExprKind::Let(ref pats, ref expr) => {
+                self.print_let(pats, expr)?;
             }
             ast::ExprKind::If(ref test, ref blk, ref elseopt) => {
                 self.print_if(test, blk, elseopt.as_ref().map(|e| &**e))?;
@@ -2236,14 +2250,14 @@ impl<'a> State<'a> {
                 self.print_block_with_attrs(blk, attrs)?;
             }
             ast::ExprKind::Assign(ref lhs, ref rhs) => {
-                let prec = AssocOp::Assign.precedence() as i8;
+                let prec = AssocOp::Assign.precedence(self.in_if) as i8;
                 self.print_expr_maybe_paren(lhs, prec + 1)?;
                 self.s.space()?;
                 self.word_space("=")?;
                 self.print_expr_maybe_paren(rhs, prec)?;
             }
             ast::ExprKind::AssignOp(op, ref lhs, ref rhs) => {
-                let prec = AssocOp::Assign.precedence() as i8;
+                let prec = AssocOp::Assign.precedence(self.in_if) as i8;
                 self.print_expr_maybe_paren(lhs, prec + 1)?;
                 self.s.space()?;
                 self.s.word(op.node.to_string())?;
@@ -2266,7 +2280,7 @@ impl<'a> State<'a> {
                 // than `Assign`, but `x .. x = x` gives a parse error instead of `x .. (x = x)`.
                 // Here we use a fake precedence value so that any child with lower precedence than
                 // a "normal" binop gets parenthesized.  (`LOr` is the lowest-precedence binop.)
-                let fake_prec = AssocOp::LOr.precedence() as i8;
+                let fake_prec = AssocOp::LOr.precedence(self.in_if) as i8;
                 if let Some(ref e) = *start {
                     self.print_expr_maybe_paren(e, fake_prec)?;
                 }
