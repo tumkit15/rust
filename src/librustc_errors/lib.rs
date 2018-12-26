@@ -19,6 +19,8 @@
 #![feature(nll)]
 #![feature(optin_builtin_traits)]
 
+#![feature(rustc_private)]
+
 extern crate atty;
 extern crate termcolor;
 #[cfg(unix)]
