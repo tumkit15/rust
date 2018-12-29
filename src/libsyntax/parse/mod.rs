@@ -1084,7 +1084,8 @@ let ex_s = [
 "if let Range { start: _, end: _ } = true..true && false {}",
 //"if let PAT = break true && false {}", // bug?
 //"if let PAT = F..|| false {}", // bug?
-"if let _ = true..&&false {}",
+//"if let _ = true..&&false {}", // bug?
+"if let _ = true && foo.is_true() {}",
 ];
 
             for ex_s in &ex_s {
